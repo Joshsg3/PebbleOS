@@ -39,6 +39,8 @@ typedef enum {
 
   //! True, if process uses Moddable XS APIs
   PROCESS_INFO_MODDABLE_APP = 1 << 10,
+  //! True, if process is a system theme package
+  PROCESS_INFO_THEME = 1 << 11,
   //! SDK older than 4.2 doesn't store any value
   PROCESS_INFO_PLATFORM_UNKNOWN = 0x0 << 6,
   PROCESS_INFO_PLATFORM_APLITE = 0x1 << 6,
@@ -176,9 +178,10 @@ typedef enum {
 // app_touch_navigation_enable() opt-in for third-party touch nav (rev 108) sdk.major:0x5
 // .minor:0x6a -- Add HRV sampling API (health_service_set_hrv_sample_period) (rev 109)
 // sdk.major:0x5 .minor:0x6b -- 24-bit app load and virtual sizes (no API changes) (rev 109)
+// sdk.major:0x5 .minor:0x6c -- Export system theme color APIs (rev 110)
 
 #define PROCESS_INFO_CURRENT_SDK_VERSION_MAJOR 0x5
-#define PROCESS_INFO_CURRENT_SDK_VERSION_MINOR 0x6b
+#define PROCESS_INFO_CURRENT_SDK_VERSION_MINOR 0x6c
 
 // The first SDK to ship with 2.x APIs
 #define PROCESS_INFO_FIRST_2X_SDK_VERSION_MAJOR 0x4

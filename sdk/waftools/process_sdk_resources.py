@@ -17,7 +17,28 @@ from sdk_helpers import is_sdk_2x, validate_resource_not_larger_than
 from waflib import Node
 
 
-def _preprocess_resource_ids(bld, resources_list, has_published_media=False):
+def _parse_gcolor8(val, default=0x00):
+    if not val:
+        return default
+    if isinstance(val, int):
+        return val & 0xFF
+    s = str(val).strip().removeprefix("#")
+    if s.startswith(("0x", "0X")):
+        s = s[2:]
+    if len(s) == 6:
+        rgb = int(s, 16)
+        r = (rgb >> 16) & 0xFF
+        g = (rgb >> 8) & 0xFF
+        b = rgb & 0xFF
+        return 0xC0 | ((r >> 6) << 4) | ((g >> 6) << 2) | (b >> 6)
+    if len(s) == 2:
+        return int(s, 16) & 0xFF
+    return default
+
+
+def _preprocess_resource_ids(
+    bld, resources_list, has_published_media=False, has_theme=False
+):
     """
     This method reads all of the defined resources for the project and assigns resource IDs to
     them prior to the start of resource processing. This preprocessing step is necessary in order
@@ -26,6 +47,7 @@ def _preprocess_resource_ids(bld, resources_list, has_published_media=False):
     :param bld: the BuildContext object
     :param resources_list: the list of resources defined for this project
     :param has_published_media: boolean for whether publishedMedia exists for the project
+    :param has_theme: boolean for whether a theme manifest exists for the project
     :return: None
     """
     resource_id_mapping = {}
@@ -35,10 +57,13 @@ def _preprocess_resource_ids(bld, resources_list, has_published_media=False):
         # The timeline lookup table must be the first resource if one exists
         resource_id_mapping["TIMELINE_LUT"] = next_id
         next_id += 1
+    elif has_theme:
+        resource_id_mapping["THEME_MANIFEST"] = next_id
+        next_id += 1
 
     for res_id, res in enumerate(resources_list, start=next_id):
         if isinstance(res, Node.Node):
-            if res.name == "timeline_resource_table.reso":
+            if res.name in ("timeline_resource_table.reso", "theme_manifest.reso"):
                 continue
             res_name = ResourceObject.load(res.abspath()).definition.name
             resource_id_mapping[res_name] = res_id
@@ -136,13 +161,9 @@ def generate_resources(bld, resource_source_path):
             )
             resource_definitions.append(mod_definition)
             resource_file_mapping["MOD"] = mod_path
-            print(
-                f"Auto-injected MOD resource for {platform} from {mod_path}"
-            )
+            print(f"Auto-injected MOD resource for {platform} from {mod_path}")
         else:
-            print(
-                f"WARNING: MOD resource not found at {full_mod_path} for {platform}"
-            )
+            print(f"WARNING: MOD resource not found at {full_mod_path} for {platform}")
 
     bld_dir = bld.path.get_bld().make_node(bld.env.BUILD_DIR)
     lib_resources = []
@@ -215,19 +236,53 @@ def generate_resources(bld, resource_source_path):
         bld.env.PROJECT_RESBALL = project_resource_ball
 
     # Only create TLUT for non-packages
+    theme_json = getattr(bld.env, "THEME_JSON", None)
     if published_media_json and build_type != "lib":
-            timeline_resource_table = bld_dir.make_node("timeline_resource_table.reso")
-            resources_list.append(timeline_resource_table)
-            _preprocess_resource_ids(bld, resources_list, True)
+        timeline_resource_table = bld_dir.make_node("timeline_resource_table.reso")
+        resources_list.append(timeline_resource_table)
+        _preprocess_resource_ids(bld, resources_list, True, False)
 
-            bld(
-                features="process_timeline_resources",
-                published_media=published_media_json,
-                timeline_reso=timeline_resource_table,
-                layouts_json=bld_dir.make_node("layouts.json"),
-                resource_mapping=resource_file_mapping,
-                vars=["RESOURCE_ID_MAPPING", "PUBLISHED_MEDIA_JSON"],
+        bld(
+            features="process_timeline_resources",
+            published_media=published_media_json,
+            timeline_reso=timeline_resource_table,
+            layouts_json=bld_dir.make_node("layouts.json"),
+            resource_mapping=resource_file_mapping,
+            vars=["RESOURCE_ID_MAPPING", "PUBLISHED_MEDIA_JSON"],
+        )
+    elif theme_json and build_type != "lib":
+        import struct
+
+        theme_reso = bld_dir.make_node("theme_manifest.reso")
+        resources_list.insert(0, theme_reso)
+        _preprocess_resource_ids(bld, resources_list, False, True)
+
+        def _write_theme_reso(task):
+            mapping = task.env.RESOURCE_ID_MAPPING or {}
+            t = task.env.THEME_JSON or {}
+            bg_name = t.get("backgroundImage")
+            bg_res_id = mapping.get(bg_name, 0) if bg_name else 0
+            data = struct.pack(
+                "<4sBBBBBBBBI",
+                b"THME",
+                1,
+                _parse_gcolor8(t.get("primaryColor"), 0xCF),
+                _parse_gcolor8(t.get("primaryTextColor"), 0x00),
+                _parse_gcolor8(t.get("secondaryColor"), 0xC6),
+                _parse_gcolor8(t.get("secondaryTextColor"), 0x00),
+                _parse_gcolor8(t.get("backgroundColor"), 0xFF),
+                _parse_gcolor8(t.get("textColor"), 0x00),
+                _parse_gcolor8(t.get("subtitleColor"), 0x00),
+                bg_res_id,
             )
+            r = ResourceObject(ResourceDefinition("raw", "THEME_MANIFEST", ""), data)
+            r.dump(task.outputs[0])
+
+        bld(
+            rule=_write_theme_reso,
+            target=theme_reso,
+            vars=["RESOURCE_ID_MAPPING", "THEME_JSON"],
+        )
 
     # Create resource objects from a set of resource definitions and package them in a resource ball
     bld(
