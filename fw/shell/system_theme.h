@@ -22,16 +22,6 @@ typedef enum ThemeAppColorMode {
   ThemeAppColorMode_Count
 } ThemeAppColorMode;
 
-typedef struct PBL_PACKED SystemThemeColors {
-  GColor8 primary_color;
-  GColor8 primary_text_color;
-  GColor8 secondary_color;
-  GColor8 secondary_text_color;
-  GColor8 background_color;
-  GColor8 text_color;
-  GColor8 subtitle_color;
-} SystemThemeColors;
-
 typedef struct PBL_PACKED ThemePackageManifest {
   uint32_t magic;
   uint8_t version;
@@ -128,18 +118,10 @@ PreferredContentSize system_theme_get_default_content_size_for_runtime_platform(
 PreferredContentSize system_theme_convert_host_content_size_to_runtime_platform(
     PreferredContentSize size);
 
-//! Populate \p colors_out with the resolved system theme colors.
-void system_theme_get_colors(SystemThemeColors *colors_out);
-
 //! Populate \p colors_out with the resolved colors for a default system app, respecting
 //! the user's \ref ThemeAppColorMode preference.
 void system_theme_get_app_colors(GColor default_primary, GColor default_secondary,
                                  SystemThemeColors *colors_out);
-
-GColor system_theme_get_primary_color(void);
-GColor system_theme_get_secondary_color(void);
-GColor system_theme_get_background_color(void);
-GColor system_theme_get_text_color(void);
 
 //! Create a GBitmap for the active theme's background image resource, or nullptr if none.
 //! Caller owns the returned GBitmap and must free it with gbitmap_destroy().

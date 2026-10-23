@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <applib/graphics/gtypes.h>
+
 #if !PUBLIC_SDK
 #include <board/display.h>
 #endif
@@ -44,3 +46,30 @@ typedef enum PreferredContentSize {
 //! should use for display.
 //! @return The user's \ref PreferredContentSize setting.
 PreferredContentSize preferred_content_size(void);
+
+//! System theme color palette.
+typedef struct SystemThemeColors {
+  GColor8 primary_color;        //!< Primary accent / highlight color
+  GColor8 primary_text_color;   //!< Legible text color over primary_color
+  GColor8 secondary_color;      //!< Secondary accent color
+  GColor8 secondary_text_color; //!< Legible text color over secondary_color
+  GColor8 background_color;     //!< Window / menu background color
+  GColor8 text_color;           //!< Primary text color over background_color
+  GColor8 subtitle_color;       //!< Secondary / subtitle text color over background_color
+} SystemThemeColors;
+
+//! Populates `colors_out` with the active system theme color palette.
+//! @param[out] colors_out Pointer to a \ref SystemThemeColors struct to populate.
+void system_theme_get_colors(SystemThemeColors *colors_out);
+
+//! @return The active system theme's primary accent color.
+GColor system_theme_get_primary_color(void);
+
+//! @return The active system theme's secondary accent color.
+GColor system_theme_get_secondary_color(void);
+
+//! @return The active system theme's background color.
+GColor system_theme_get_background_color(void);
+
+//! @return The active system theme's primary text color.
+GColor system_theme_get_text_color(void);
