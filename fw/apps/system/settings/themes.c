@@ -11,14 +11,21 @@
 
 #include <pbl/kernel/fatal.h>
 #include <pbl/logging/logging.h>
+#include <pbl/services/app_cache.h>
+#include <pbl/services/app_fetch_endpoint.h>
 #include <pbl/services/i18n/i18n.h>
+#include <pbl/services/timeline/timeline_resources.h>
 #include <pbl/util/size.h>
 
+#include <applib/event_service_client.h>
 #include <applib/graphics/gtypes.h>
 #include <applib/ui/app_window_stack.h>
 #include <applib/ui/menu_layer.h>
 #include <applib/ui/option_menu_window.h>
+#include <applib/ui/progress_window.h>
 #include <kernel/pbl_malloc.h>
+#include <process_management/app_install_manager.h>
+#include <process_management/app_menu_data_source.h>
 #include <shell/prefs.h>
 #include <shell/system_theme.h>
 
@@ -84,6 +91,13 @@ enum SettingsThemesItem {
 
 typedef struct SettingsThemesData {
   SettingsCallbacks callbacks;
+  AppMenuDataSource theme_data_source;
+  OptionMenu *theme_option_menu;
+  ProgressWindow fetch_progress_window;
+  EventServiceInfo fetch_event_info;
+  AppInstallId fetching_install_id;
+  bool fetch_in_progress;
+  char active_theme_name[APP_NAME_SIZE_BYTES];
   const char *accent_labels[ARRAY_LENGTH(s_accent_color_definitions)];
   const char *bg_labels[ARRAY_LENGTH(s_bg_color_definitions)];
 } SettingsThemesData;
@@ -128,6 +142,16 @@ static bool prv_is_default_light_theme(void) {
 }
 
 static const char *prv_get_active_theme_subtitle(SettingsThemesData *data) {
+  const Uuid active_uuid = shell_prefs_get_theme_active_uuid();
+  if (!uuid_is_invalid(&active_uuid)) {
+    const AppInstallId id = app_install_get_id_for_uuid(&active_uuid);
+    AppInstallEntry entry;
+    if (id != INSTALL_ID_INVALID && app_install_get_entry_for_install_id(id, &entry)) {
+      strncpy(data->active_theme_name, entry.name, sizeof(data->active_theme_name) - 1);
+      data->active_theme_name[sizeof(data->active_theme_name) - 1] = '\0';
+      return data->active_theme_name;
+    }
+  }
   if (prv_is_default_dark_theme()) {
     return i18n_noop("Default Dark");
   }
@@ -137,8 +161,74 @@ static const char *prv_get_active_theme_subtitle(SettingsThemesData *data) {
   return i18n_noop("Custom");
 }
 
+// Theme Package Selection & On-Demand App Fetch
+/////////////////////////////////////////////////
+
+static bool prv_theme_app_filter_callback(struct AppMenuDataSource *source,
+                                          AppInstallEntry *entry) {
+  return app_install_entry_is_theme(entry);
+}
+
+static void prv_theme_fetch_cleanup(SettingsThemesData *data) {
+  if (data->fetch_in_progress) {
+    event_service_client_unsubscribe(&data->fetch_event_info);
+    data->fetch_in_progress = false;
+  }
+}
+
+static void prv_fetch_progress_finished(ProgressWindow *window, bool success, void *context) {
+  SettingsThemesData *data = context;
+  if (success && data->fetching_install_id != INSTALL_ID_INVALID) {
+    system_theme_apply_from_install_id(data->fetching_install_id);
+  }
+  data->fetching_install_id = INSTALL_ID_INVALID;
+  progress_window_pop(window);
+  progress_window_deinit(window);
+  settings_menu_reload_data(SettingsMenuItemThemes);
+  settings_menu_mark_dirty(SettingsMenuItemThemes);
+}
+
+static void prv_theme_fetch_event_handler(PebbleEvent *event, void *context) {
+  SettingsThemesData *data = context;
+  PebbleAppFetchEvent *af_event = (PebbleAppFetchEvent *)event;
+
+  if (af_event->type == AppFetchEventTypeProgress) {
+    progress_window_set_progress(&data->fetch_progress_window, af_event->progress_percent);
+  } else if (af_event->type == AppFetchEventTypeFinish) {
+    prv_theme_fetch_cleanup(data);
+    progress_window_set_result_success(&data->fetch_progress_window);
+  } else if (af_event->type == AppFetchEventTypeError) {
+    prv_theme_fetch_cleanup(data);
+    progress_window_set_result_failure(&data->fetch_progress_window,
+                                       TIMELINE_RESOURCE_GENERIC_WARNING, i18n_get("Failed", data),
+                                       PROGRESS_WINDOW_DEFAULT_FAILURE_DELAY_MS);
+  }
+}
+
+static void prv_start_theme_fetch(SettingsThemesData *data, const AppMenuNode *node) {
+  prv_theme_fetch_cleanup(data);
+  data->fetching_install_id = node->install_id;
+  data->fetch_in_progress = true;
+
+  progress_window_init(&data->fetch_progress_window);
+  progress_window_set_callbacks(&data->fetch_progress_window,
+                                (ProgressWindowCallbacks){
+                                  .finished = prv_fetch_progress_finished,
+                                },
+                                data);
+  data->fetch_event_info = (EventServiceInfo){
+    .type = PEBBLE_APP_FETCH_EVENT,
+    .handler = prv_theme_fetch_event_handler,
+    .context = data,
+  };
+  event_service_client_subscribe(&data->fetch_event_info);
+  app_progress_window_push(&data->fetch_progress_window);
+  app_fetch_binaries(&node->uuid, node->install_id, false /* has_worker */);
+}
+
 static uint16_t prv_theme_menu_get_num_rows(OptionMenu *option_menu, void *context) {
-  return THEME_PRESET_COUNT;
+  SettingsThemesData *data = context;
+  return THEME_PRESET_COUNT + app_menu_data_source_get_count(&data->theme_data_source);
 }
 
 static void prv_theme_menu_draw_row(OptionMenu *option_menu, GContext *ctx, const Layer *cell_layer,
@@ -150,17 +240,59 @@ static void prv_theme_menu_draw_row(OptionMenu *option_menu, GContext *ctx, cons
     title = i18n_get("Default Light", data);
   } else if (row == THEME_PRESET_DEFAULT_DARK) {
     title = i18n_get("Default Dark", data);
+  } else {
+    AppMenuNode *node =
+        app_menu_data_source_get_node_at_index(&data->theme_data_source, row - THEME_PRESET_COUNT);
+    title = node ? node->name : "";
   }
   option_menu_system_draw_row(option_menu, ctx, cell_layer, cell_frame, title, selected, context);
 }
 
 static void prv_theme_menu_select(OptionMenu *option_menu, int selection, void *context) {
+  SettingsThemesData *data = context;
   if (selection == THEME_PRESET_DEFAULT_LIGHT) {
     system_theme_reset_to_default(false /* dark_mode */);
-  } else if (selection == THEME_PRESET_DEFAULT_DARK) {
+    app_window_stack_remove(&option_menu->window, true /* animated */);
+    return;
+  }
+  if (selection == THEME_PRESET_DEFAULT_DARK) {
     system_theme_reset_to_default(true /* dark_mode */);
+    app_window_stack_remove(&option_menu->window, true /* animated */);
+    return;
+  }
+
+  const uint16_t node_index = selection - THEME_PRESET_COUNT;
+  if (node_index < app_menu_data_source_get_count(&data->theme_data_source)) {
+    const AppMenuNode *node =
+        app_menu_data_source_get_node_at_index(&data->theme_data_source, node_index);
+    if (node) {
+      if (app_install_id_from_system(node->install_id) ||
+          app_cache_entry_exists(node->install_id)) {
+        system_theme_apply_from_install_id(node->install_id);
+        app_window_stack_remove(&option_menu->window, true /* animated */);
+      } else {
+        const AppMenuNode node_copy = *node;
+        app_window_stack_remove(&option_menu->window, false /* animated */);
+        prv_start_theme_fetch(data, &node_copy);
+      }
+      return;
+    }
   }
   app_window_stack_remove(&option_menu->window, true /* animated */);
+}
+
+static void prv_theme_menu_unload(OptionMenu *option_menu, void *context) {
+  SettingsThemesData *data = context;
+  app_menu_data_source_deinit(&data->theme_data_source);
+  option_menu_destroy(option_menu);
+  data->theme_option_menu = nullptr;
+}
+
+static void prv_theme_data_source_changed(void *context) {
+  SettingsThemesData *data = context;
+  if (data->theme_option_menu) {
+    option_menu_reload_data(data->theme_option_menu);
+  }
 }
 
 static void prv_theme_menu_push(SettingsThemesData *data) {
@@ -168,9 +300,27 @@ static void prv_theme_menu_push(SettingsThemesData *data) {
   if (!option_menu) {
     return;
   }
+  data->theme_option_menu = option_menu;
+
+  app_menu_data_source_init(&data->theme_data_source,
+                            &(AppMenuDataSourceCallbacks){
+                              .changed = prv_theme_data_source_changed,
+                              .filter = prv_theme_app_filter_callback,
+                            },
+                            data);
 
   int choice = OPTION_MENU_CHOICE_NONE;
-  if (prv_is_default_dark_theme()) {
+  const AppInstallId active_id = system_theme_get_active_install_id();
+  if (active_id != INSTALL_ID_INVALID) {
+    const uint16_t count = app_menu_data_source_get_count(&data->theme_data_source);
+    for (uint16_t i = 0; i < count; i++) {
+      const AppMenuNode *node = app_menu_data_source_get_node_at_index(&data->theme_data_source, i);
+      if (node && node->install_id == active_id) {
+        choice = THEME_PRESET_COUNT + i;
+        break;
+      }
+    }
+  } else if (prv_is_default_dark_theme()) {
     choice = THEME_PRESET_DEFAULT_DARK;
   } else if (prv_is_default_light_theme()) {
     choice = THEME_PRESET_DEFAULT_LIGHT;
@@ -192,6 +342,7 @@ static void prv_theme_menu_push(SettingsThemesData *data) {
                               .draw_row = prv_theme_menu_draw_row,
                               .get_num_rows = prv_theme_menu_get_num_rows,
                               .select = prv_theme_menu_select,
+                              .unload = prv_theme_menu_unload,
                             },
                             data);
   app_window_stack_push(&option_menu->window, true /* animated */);
@@ -415,6 +566,7 @@ static uint16_t prv_themes_num_rows_cb(SettingsCallbacks *context) {
 
 static void prv_themes_deinit_cb(SettingsCallbacks *context) {
   SettingsThemesData *data = (SettingsThemesData *)context;
+  prv_theme_fetch_cleanup(data);
   i18n_free_all(data);
   app_free(data);
 }
@@ -424,7 +576,9 @@ static void prv_themes_deinit_cb(SettingsCallbacks *context) {
 static Window *prv_init(void) {
 #ifdef CONFIG_THEMING
   SettingsThemesData *data = app_malloc_check(sizeof(*data));
-  *data = (SettingsThemesData){};
+  *data = (SettingsThemesData){
+    .fetching_install_id = INSTALL_ID_INVALID,
+  };
   data->callbacks = (SettingsCallbacks){
     .deinit = prv_themes_deinit_cb,
     .draw_row = prv_themes_draw_row_cb,

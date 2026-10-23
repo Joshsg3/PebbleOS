@@ -9,6 +9,12 @@
 #include <applib/graphics/gtypes.h>
 #include <applib/platform.h>
 #include <applib/preferred_content_size.h>
+#include <process_management/app_install_types.h>
+
+#define THEME_RESOURCE_MAGIC        0x454D4854U // 'THME'
+#define THEME_RESOURCE_VERSION      1U
+#define THEME_MANIFEST_RESOURCE_ID  1U
+#define THEME_BG_MAX_RESOURCE_BYTES (16 * 1024)
 
 typedef enum ThemeAppColorMode {
   ThemeAppColorMode_ColorsAndBackground = 0,
@@ -25,6 +31,13 @@ typedef struct PBL_PACKED SystemThemeColors {
   GColor8 text_color;
   GColor8 subtitle_color;
 } SystemThemeColors;
+
+typedef struct PBL_PACKED ThemePackageManifest {
+  uint32_t magic;
+  uint8_t version;
+  SystemThemeColors colors;
+  uint32_t bg_resource_id;
+} ThemePackageManifest;
 
 //! System Theme Text Style is a font collection used to unify text styles across the system.
 //! It contains a variety of different font sizes for use in an application, each meant for a
@@ -137,5 +150,15 @@ GBitmap *system_theme_create_background_bitmap(void);
 void system_theme_draw_background(GContext *ctx, const GRect *bounds, GColor fallback_bg_color,
                                   const GBitmap *cached_bg_bitmap);
 
+//! Load the ThemePackageManifest from Resource ID 1 of the given installed theme app.
+bool system_theme_load_manifest_for_install_id(AppInstallId install_id,
+                                               ThemePackageManifest *manifest_out);
+
+//! Apply an installed App Store theme by its AppInstallId.
+bool system_theme_apply_from_install_id(AppInstallId install_id);
+
 //! Reset the active theme to the built-in Light or Dark preset.
 void system_theme_reset_to_default(bool dark_mode);
+
+//! Return the AppInstallId of the currently active App Store theme, or INSTALL_ID_INVALID.
+AppInstallId system_theme_get_active_install_id(void);

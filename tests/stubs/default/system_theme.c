@@ -102,5 +102,18 @@ void PBL_WEAK system_theme_draw_background(GContext *ctx, const GRect *bounds,
   }
 }
 
+bool PBL_WEAK system_theme_load_manifest_for_install_id(AppInstallId install_id,
+                                                        ThemePackageManifest *manifest_out) {
+  return false;
+}
+
+bool PBL_WEAK system_theme_apply_from_install_id(AppInstallId install_id) {
+  return false;
+}
+
 void PBL_WEAK system_theme_reset_to_default(bool dark_mode) {
+}
+
+AppInstallId PBL_WEAK system_theme_get_active_install_id(void) {
+  return INSTALL_ID_INVALID;
 }

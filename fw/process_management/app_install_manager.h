@@ -83,6 +83,7 @@ typedef struct {
   ProcessVisibility visibility;
   ProcessType process_type; // WATCHFACE/APP
   bool has_worker;
+  bool is_theme;
   Uuid uuid;
   GColor color;
   char name[APP_NAME_SIZE_BYTES];
@@ -181,6 +182,13 @@ bool app_install_is_watchface(AppInstallId app_id);
 //! Returns true if the app associated with the provided entry is a watchface
 //! @param entry AppInstallEntry to check the parameters of
 bool app_install_entry_is_watchface(const AppInstallEntry *entry);
+
+//! Returns true if the app associated with the provided entry is a theme package
+//! @param entry AppInstallEntry to check the parameters of
+bool app_install_entry_is_theme(const AppInstallEntry *entry);
+
+//! Gets whether the app is a theme package given an AppInstallId.
+bool app_install_is_theme(AppInstallId app_id);
 
 //! Returns true if the app associated with the provided entry has a worker
 //! @param entry AppInstallEntry to check the parameters of

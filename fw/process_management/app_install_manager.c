@@ -32,6 +32,8 @@
 #include <kernel/pbl_malloc.h>
 #include <kernel/pebble_tasks.h>
 #include <resource/resource.h>
+#include <shell/prefs.h>
+#include <shell/system_theme.h>
 
 typedef struct PBL_PACKED RecentApp {
   AppInstallId id;
@@ -179,6 +181,10 @@ void app_install_manager_flush_recent_communication_timestamps(void) {
 
 bool app_install_entry_is_watchface(const AppInstallEntry *entry) {
   return (entry->process_type == ProcessTypeWatchface);
+}
+
+bool app_install_entry_is_theme(const AppInstallEntry *entry) {
+  return entry->is_theme;
 }
 
 bool app_install_entry_has_worker(const AppInstallEntry *entry) {
@@ -433,6 +439,13 @@ static void app_install_launcher_task_callback(void *context) {
       // app, not during an AppDB clear.
       if (!app_upgrade) {
         persist_service_delete_file(s_install_callback_data.uuid);
+        if (s_install_callback_data.uuid) {
+          Uuid active_theme_uuid = shell_prefs_get_theme_active_uuid();
+          if (!uuid_is_invalid(&active_theme_uuid) &&
+              uuid_equal(&active_theme_uuid, s_install_callback_data.uuid)) {
+            system_theme_reset_to_default(false);
+          }
+        }
 #if !defined(CONFIG_RECOVERY_FW)
         comm_session_app_session_capabilities_evict(s_install_callback_data.uuid);
 #endif
@@ -640,6 +653,7 @@ static bool prv_app_install_entry_from_app_db_entry(AppInstallId id, AppDBEntry 
     // applications registered with the manager are applications, not workers.
     .process_type = process_metadata_flags_process_type(db_entry->info_flags, PebbleTask_App),
     .has_worker = process_metadata_flags_has_worker(db_entry->info_flags),
+    .is_theme = process_metadata_flags_is_theme(db_entry->info_flags),
     .icon_resource_id = db_entry->icon_resource_id,
     .uuid = db_entry->uuid,
     .color = prv_valid_color_from_uuid(db_entry->app_face_bg_color, (Uuid *)&db_entry->uuid),
@@ -670,6 +684,7 @@ static bool prv_app_install_entry_from_resource_registry_entry(const AppRegistry
     // applications registered with the manager are applications, not workers.
     .process_type = process_metadata_flags_process_type(app_header->flags, PebbleTask_App),
     .has_worker = process_metadata_flags_has_worker(app_header->flags),
+    .is_theme = process_metadata_flags_is_theme(app_header->flags),
     .icon_resource_id = reg_entry->icon_resource_id,
     .uuid = reg_entry->uuid,
     .color = prv_valid_color_from_uuid(reg_entry->color, (Uuid *)&reg_entry->uuid),
@@ -765,6 +780,14 @@ bool app_install_is_watchface(AppInstallId app_id) {
     return false;
   }
   return app_install_entry_is_watchface(&entry);
+}
+
+bool app_install_is_theme(AppInstallId app_id) {
+  AppInstallEntry entry;
+  if (!app_install_get_entry_for_install_id(app_id, &entry)) {
+    return false;
+  }
+  return app_install_entry_is_theme(&entry);
 }
 
 static const PebbleProcessMd *prv_get_md_for_reg_entry(const AppRegistryEntry *reg_entry) {
