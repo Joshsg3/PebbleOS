@@ -27,9 +27,9 @@ def generate_appinfo_c(app_info, output_filename, platform_name=None):
         app_uuid = uuid.UUID(app_info["uuid"])
     except KeyError:
         raise RuntimeError("Could not find $.uuid in appinfo.json")
-    uuid_initializer_string = "{{ {} }}".format(", ".join(
-        [f"0x{b:02X}" for b in app_uuid.bytes]
-    ))
+    uuid_initializer_string = "{{ {} }}".format(
+        ", ".join([f"0x{b:02X}" for b in app_uuid.bytes])
+    )
 
     try:
         name = app_info["shortName"]
@@ -85,6 +85,14 @@ def generate_appinfo_c(app_info, output_filename, platform_name=None):
     except KeyError:
         is_hidden = False
 
+    try:
+        is_theme = app_info["watchapp"]["theme"]
+    except KeyError:
+        is_theme = "theme" in app_info
+
+    if is_theme and "hiddenApp" not in app_info.get("watchapp", {}):
+        is_hidden = True
+
     # Handle 'resources' options
     icon_resource_id = None
     try:
@@ -115,6 +123,8 @@ def generate_appinfo_c(app_info, output_filename, platform_name=None):
         flags.append("PROCESS_INFO_VISIBILITY_HIDDEN")
     if is_moddable:
         flags.append("PROCESS_INFO_MODDABLE_APP")
+    if is_theme:
+        flags.append("PROCESS_INFO_THEME")
     if platform_name:
         flags.append(f"PROCESS_INFO_PLATFORM_{platform_name.upper()}")
 

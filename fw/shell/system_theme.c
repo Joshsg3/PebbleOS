@@ -15,6 +15,7 @@
 #include <applib/fonts/fonts.h>
 #include <applib/graphics/graphics.h>
 #include <applib/graphics/gtypes.h>
+#include <process_management/app_install_manager.h>
 #include <process_management/process_manager.h>
 #include <resource/resource.h>
 #include <shell/prefs.h>
@@ -179,12 +180,37 @@ PBL_SYSCALL(GColor, system_theme_get_text_color) {
   return text;
 }
 
+AppInstallId system_theme_get_active_install_id(void) {
+  Uuid uuid = shell_prefs_get_theme_active_uuid();
+  if (uuid_is_invalid(&uuid)) {
+    return INSTALL_ID_INVALID;
+  }
+  return app_install_get_id_for_uuid(&uuid);
+}
+
 GBitmap *system_theme_create_background_bitmap(void) {
   const uint32_t bg_res_id = shell_prefs_get_theme_bg_resource_id();
   if (bg_res_id == 0) {
     return nullptr;
   }
-  return gbitmap_create_with_resource_system(SYSTEM_APP, bg_res_id);
+
+  ResAppNum app_num = SYSTEM_APP;
+  Uuid uuid = shell_prefs_get_theme_active_uuid();
+  if (!uuid_is_invalid(&uuid)) {
+    const AppInstallId id = app_install_get_id_for_uuid(&uuid);
+    if (id == INSTALL_ID_INVALID) {
+      return nullptr;
+    }
+    app_num = app_install_id_from_system(id) ? SYSTEM_APP : (ResAppNum)id;
+  }
+
+  const size_t res_size = resource_size(app_num, bg_res_id);
+  if (res_size == 0 || res_size > THEME_BG_MAX_RESOURCE_BYTES) {
+    PBL_LOG_WRN("Theme bg resource %" PRIu32 " invalid size %zu", bg_res_id, res_size);
+    return nullptr;
+  }
+
+  return gbitmap_create_with_resource_system(app_num, bg_res_id);
 }
 
 void system_theme_draw_background(GContext *ctx, const GRect *bounds, GColor fallback_bg_color,
@@ -201,6 +227,48 @@ void system_theme_draw_background(GContext *ctx, const GRect *bounds, GColor fal
     graphics_draw_bitmap_in_rect(ctx, cached_bg_bitmap, bounds);
   }
 #endif
+}
+
+bool system_theme_load_manifest_for_install_id(AppInstallId install_id,
+                                               ThemePackageManifest *manifest_out) {
+  if (install_id == INSTALL_ID_INVALID || !manifest_out) {
+    return false;
+  }
+
+  const ResAppNum app_num =
+      app_install_id_from_system(install_id) ? SYSTEM_APP : (ResAppNum)install_id;
+  if (resource_load_byte_range_system(app_num, THEME_MANIFEST_RESOURCE_ID, 0,
+                                      (uint8_t *)manifest_out,
+                                      sizeof(*manifest_out)) != sizeof(*manifest_out)) {
+    return false;
+  }
+
+  if (manifest_out->magic != THEME_RESOURCE_MAGIC ||
+      manifest_out->version != THEME_RESOURCE_VERSION) {
+    PBL_LOG_WRN("Invalid theme manifest magic 0x%08" PRIx32 " or version %u", manifest_out->magic,
+                manifest_out->version);
+    return false;
+  }
+
+  return true;
+}
+
+bool system_theme_apply_from_install_id(AppInstallId install_id) {
+  ThemePackageManifest manifest = {};
+  if (!system_theme_load_manifest_for_install_id(install_id, &manifest)) {
+    return false;
+  }
+
+  Uuid uuid = UUID_INVALID;
+  app_install_get_uuid_for_install_id(install_id, &uuid);
+
+  shell_prefs_set_theme_active_uuid(&uuid);
+  shell_prefs_set_theme_highlight_color(manifest.colors.primary_color);
+  shell_prefs_set_theme_secondary_color(manifest.colors.secondary_color);
+  shell_prefs_set_theme_background_color(manifest.colors.background_color);
+  shell_prefs_set_theme_text_color(manifest.colors.text_color);
+  shell_prefs_set_theme_bg_resource_id(manifest.bg_resource_id);
+  return true;
 }
 
 void system_theme_reset_to_default(bool dark_mode) {

@@ -221,6 +221,9 @@ def configure(conf):
         if "publishedMedia" in project_info["resources"]:
             conf.env.PUBLISHED_MEDIA_JSON = project_info["resources"]["publishedMedia"]
 
+    if "theme" in project_info:
+        conf.env.THEME_JSON = project_info["theme"]
+
     conf.env.REQUESTED_PLATFORMS = project_info.get("targetPlatforms", [])
     conf.env.LIB_DIR = "node_modules"
 

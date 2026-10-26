@@ -44,6 +44,14 @@ bool PBL_WEAK app_install_entry_is_watchface(const AppInstallEntry *entry) {
   return false;
 }
 
+bool PBL_WEAK app_install_entry_is_theme(const AppInstallEntry *entry) {
+  return false;
+}
+
+bool PBL_WEAK app_install_is_theme(AppInstallId app_id) {
+  return false;
+}
+
 bool PBL_WEAK app_install_entry_is_hidden(const AppInstallEntry *entry) {
   return false;
 }

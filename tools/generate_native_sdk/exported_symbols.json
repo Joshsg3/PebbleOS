@@ -2,7 +2,7 @@
   "_notes": [ "You need to increase the revision for each change of this file AND",
               "increase PROCESS_INFO_CURRENT_SDK_VERSION_MINOR in pebble_process_info.h"
             ],
-  "revision" : "109",
+  "revision" : "110",
   "version" : "2.0",
   "files": [
     "include/pbl/drivers/button_id.h",
@@ -4471,6 +4471,34 @@
               "implName": "sys_do_not_disturb_is_active",
               "stubReturn": "false",
               "addedRevision": "89"
+            }, {
+              "type": "type",
+              "name": "SystemThemeColors",
+              "addedRevision": "110"
+            }, {
+              "type": "function",
+              "name": "system_theme_get_colors",
+              "addedRevision": "110"
+            }, {
+              "type": "function",
+              "name": "system_theme_get_primary_color",
+              "addedRevision": "110",
+              "stubReturn": "GColorBlack"
+            }, {
+              "type": "function",
+              "name": "system_theme_get_secondary_color",
+              "addedRevision": "110",
+              "stubReturn": "GColorBlack"
+            }, {
+              "type": "function",
+              "name": "system_theme_get_background_color",
+              "addedRevision": "110",
+              "stubReturn": "GColorWhite"
+            }, {
+              "type": "function",
+              "name": "system_theme_get_text_color",
+              "addedRevision": "110",
+              "stubReturn": "GColorBlack"
             }
           ]
         }
